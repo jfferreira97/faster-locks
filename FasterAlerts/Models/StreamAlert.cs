@@ -17,5 +17,6 @@ public class StreamAlert
     public string CreatorWallet { get; set; } = "";
     public decimal PriceUsd { get; set; }
     public decimal MarketCapUsd { get; set; }
+    public DateTimeOffset? PairCreatedAt { get; set; }
     public DateTimeOffset Timestamp { get; set; }
 }

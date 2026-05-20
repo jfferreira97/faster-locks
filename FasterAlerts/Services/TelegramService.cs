@@ -56,15 +56,20 @@ public class TelegramService(HttpClient http, IConfiguration config, ILogger<Tel
         // Line 1: pct of supply + symbol + market cap
         var pct = a.PercentSupply > 0 ? $"{a.PercentSupply:F1}%" : "?%";
         var mc  = a.MarketCapUsd > 0 ? $" (${FormatMc(a.MarketCapUsd)} MC)" : "";
-        sb.AppendLine($"🔒 <b>{pct} of ${HtmlEncode(a.TokenSymbol)}{mc} LOCKED</b>");
+        var age = a.PairCreatedAt.HasValue ? $" · {FormatAge(a.PairCreatedAt.Value)}" : "";
+        sb.AppendLine($"🔒 <b>{pct} of ${HtmlEncode(a.TokenSymbol)}{mc} LOCKED</b>{age}");
         sb.AppendLine();
         sb.AppendLine($"📝 Contract: <code>{a.TokenMint}</code>");
 
-        if (a.UnlockDate.HasValue)
+        if (a.UnlockDate.HasValue && a.UnlockDate.Value.Year >= 2020)
         {
             var until    = a.UnlockDate.Value.ToString("MMM d, yyyy HH:mm UTC");
             var duration = FormatTimeUntil(a.UnlockDate.Value);
             sb.AppendLine($"⏰ For: <b>{duration}</b> | Until {until}");
+        }
+        else if (a.UnlockDate.HasValue && a.UnlockDate.Value.Year < 2020)
+        {
+            sb.AppendLine("⏰ <b>Permanent Lock</b>");
         }
         else
         {
@@ -76,6 +81,18 @@ public class TelegramService(HttpClient http, IConfiguration config, ILogger<Tel
         sb.Append($"🔗 <a href=\"{solscanUrl}\">Solscan</a> | <a href=\"{streamUrl}\">Streamflow</a>");
 
         return sb.ToString();
+    }
+
+    private static string FormatAge(DateTimeOffset createdAt)
+    {
+        var diff    = DateTimeOffset.UtcNow - createdAt;
+        var days    = (int)diff.TotalDays;
+        var hours   = diff.Hours;
+        var minutes = diff.Minutes;
+
+        if (days >= 1)   return hours > 0   ? $"{days}d {hours}h old"    : $"{days}d old";
+        if (hours >= 1)  return minutes > 0 ? $"{hours}h {minutes}m old" : $"{hours}h old";
+        return $"{minutes}m old";
     }
 
     private static string FormatTimeUntil(DateTimeOffset unlockDate)

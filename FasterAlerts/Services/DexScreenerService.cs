@@ -34,6 +34,9 @@ public class DexScreenerService(HttpClient http, ILogger<DexScreenerService> log
             alert.TokenName = pair.BaseToken?.Name ?? ShortAddr(alert.TokenMint);
             alert.TokenSymbol = pair.BaseToken?.Symbol ?? "???";
 
+            if (pair.PairCreatedAt > 0)
+                alert.PairCreatedAt = DateTimeOffset.FromUnixTimeMilliseconds(pair.PairCreatedAt);
+
             if (decimal.TryParse(pair.PriceUsd, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var price))
                 alert.PriceUsd = price;
 
@@ -85,6 +88,9 @@ file class DexPair
 
     [JsonPropertyName("fdv")]
     public decimal Fdv { get; set; }
+
+    [JsonPropertyName("pairCreatedAt")]
+    public long PairCreatedAt { get; set; }
 }
 
 file class DexToken
