@@ -54,7 +54,7 @@ public class TelegramService(HttpClient http, IConfiguration config, ILogger<Tel
         var sb = new StringBuilder();
 
         // Line 1: pct of supply + symbol + market cap
-        var pct = a.PercentSupply > 0 ? $"{a.PercentSupply:F1}%" : "?%";
+        var pct = a.PercentSupply > 0 ? $"{a.PercentSupply:F2}%" : "?%";
         var mc  = a.MarketCapUsd > 0 ? $" (${FormatMc(a.MarketCapUsd)} MC)" : "";
         var age = a.PairCreatedAt.HasValue ? $" · {FormatAge(a.PairCreatedAt.Value)}" : "";
         sb.AppendLine($"🔒 <b>{pct} of ${HtmlEncode(a.TokenSymbol)}{mc} LOCKED</b>{age}");
@@ -78,7 +78,7 @@ public class TelegramService(HttpClient http, IConfiguration config, ILogger<Tel
 
         var streamUrl  = $"https://streamflow.finance/vesting/#/solana/mainnet/{a.StreamAccount}";
         var solscanUrl = $"https://solscan.io/tx/{a.Signature}";
-        sb.Append($"🔗 <a href=\"{solscanUrl}\">Solscan</a> | <a href=\"{streamUrl}\">Streamflow</a>");
+        sb.Append($"🔗 <a href=\"{solscanUrl}\">Solscan</a> | <a href=\"{streamUrl}\">Streamflow</a> | <code>#{a.NotificationId}</code>");
 
         return sb.ToString();
     }
@@ -92,7 +92,7 @@ public class TelegramService(HttpClient http, IConfiguration config, ILogger<Tel
 
         if (days >= 1)   return hours > 0   ? $"{days}d {hours}h old"    : $"{days}d old";
         if (hours >= 1)  return minutes > 0 ? $"{hours}h {minutes}m old" : $"{hours}h old";
-        return $"{minutes}m old";
+        return $"{minutes}min old";
     }
 
     private static string FormatTimeUntil(DateTimeOffset unlockDate)

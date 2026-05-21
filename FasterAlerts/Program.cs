@@ -1,4 +1,6 @@
+using FasterAlerts.Data;
 using FasterAlerts.Services;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -17,12 +19,18 @@ builder.Logging.SetMinimumLevel(LogLevel.Information);
 builder.Logging.AddFilter("Microsoft", LogLevel.Warning);
 builder.Logging.AddFilter("System.Net.Http", LogLevel.Warning);
 
+builder.Services.AddDbContext<AppDbContext>(opt =>
+    opt.UseSqlite("Data Source=faster-alerts.db"));
+
 builder.Services.AddControllers();
 builder.Services.AddSingleton<StreamflowParserService>();
 builder.Services.AddHttpClient<DexScreenerService>();
 builder.Services.AddHttpClient<TelegramService>();
 
 var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
+    scope.ServiceProvider.GetRequiredService<AppDbContext>().Database.EnsureCreated();
 
 app.MapControllers();
 

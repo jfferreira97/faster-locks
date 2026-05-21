@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using FasterAlerts.Data;
 using FasterAlerts.Models;
 using FasterAlerts.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -12,6 +13,7 @@ public class HeliusWebhookController(
     StreamflowParserService parser,
     DexScreenerService dexScreener,
     TelegramService telegram,
+    AppDbContext db,
     ILogger<HeliusWebhookController> logger) : ControllerBase
 {
     private const string PayloadLog = @"C:\Users\Administrator\Desktop\faster-locks-payloads.txt";
@@ -23,7 +25,6 @@ public class HeliusWebhookController(
         if (transactions is null || transactions.Count == 0)
             return Ok();
 
-        // Fire-and-forget payload dump — never blocks or throws into main flow
         _ = Task.Run(async () =>
         {
             try
@@ -37,7 +38,7 @@ public class HeliusWebhookController(
                 }
                 await System.IO.File.AppendAllTextAsync(PayloadLog, sb.ToString());
             }
-            catch { /* never blow up the main thread */ }
+            catch { }
         });
 
         foreach (var tx in transactions)
@@ -48,10 +49,27 @@ public class HeliusWebhookController(
                 if (alert is null) continue;
 
                 await dexScreener.EnrichAsync(alert);
+
+                var record = new SentAlert
+                {
+                    Signature    = alert.Signature,
+                    TokenMint    = alert.TokenMint,
+                    TokenSymbol  = alert.TokenSymbol,
+                    AmountLocked = alert.AmountLocked,
+                    PercentSupply = alert.PercentSupply,
+                    MarketCapUsd = alert.MarketCapUsd,
+                    UnlockDate   = alert.UnlockDate,
+                    SentAt       = DateTimeOffset.UtcNow
+                };
+                db.SentAlerts.Add(record);
+                await db.SaveChangesAsync();
+
+                alert.NotificationId = record.Id;
+
                 await telegram.SendAlertAsync(alert);
 
-                logger.LogInformation("✅ alert sent | {Symbol} | {Amount:N0} locked | sig={Sig}",
-                    alert.TokenSymbol, alert.AmountLocked, alert.Signature?[..8]);
+                logger.LogInformation("✅ alert sent | #{Id} | {Symbol} | {Amount:N0} locked | sig={Sig}",
+                    alert.NotificationId, alert.TokenSymbol, alert.AmountLocked, alert.Signature?[..8]);
             }
             catch (Exception ex)
             {

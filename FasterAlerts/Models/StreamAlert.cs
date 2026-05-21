@@ -2,6 +2,7 @@ namespace FasterAlerts.Models;
 
 public class StreamAlert
 {
+    public int NotificationId { get; set; }
     public string Signature { get; set; } = "";
     public string StreamAccount { get; set; } = "";
     public string TokenMint { get; set; } = "";
