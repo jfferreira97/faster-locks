@@ -34,4 +34,14 @@ using (var scope = app.Services.CreateScope())
 
 app.MapControllers();
 
+try
+{
+    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+    {
+        FileName = $"http://localhost:{port}/heatmap",
+        UseShellExecute = true
+    });
+}
+catch { }
+
 app.Run();
