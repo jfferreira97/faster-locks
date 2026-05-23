@@ -19,5 +19,6 @@ public class StreamAlert
     public decimal PriceUsd { get; set; }
     public decimal MarketCapUsd { get; set; }
     public DateTimeOffset? PairCreatedAt { get; set; }
-    public DateTimeOffset Timestamp { get; set; }
+    public string PairAddress            { get; set; } = "";
+    public DateTimeOffset Timestamp      { get; set; }
 }

@@ -26,11 +26,16 @@ builder.Services.AddControllers();
 builder.Services.AddSingleton<StreamflowParserService>();
 builder.Services.AddHttpClient<DexScreenerService>();
 builder.Services.AddHttpClient<TelegramService>();
+builder.Services.AddSingleton<HeliusBacktestService>();
+builder.Services.AddHttpClient<HeliusBacktestService>();
 
 var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
-    scope.ServiceProvider.GetRequiredService<AppDbContext>().Database.EnsureCreated();
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    db.Database.EnsureCreated();
+}
 
 app.MapControllers();
 

@@ -31,8 +31,9 @@ public class DexScreenerService(HttpClient http, ILogger<DexScreenerService> log
                 return;
             }
 
-            alert.TokenName = pair.BaseToken?.Name ?? ShortAddr(alert.TokenMint);
+            alert.TokenName   = pair.BaseToken?.Name   ?? ShortAddr(alert.TokenMint);
             alert.TokenSymbol = pair.BaseToken?.Symbol ?? "???";
+            alert.PairAddress = pair.PairAddress ?? "";
 
             if (pair.PairCreatedAt > 0)
                 alert.PairCreatedAt = DateTimeOffset.FromUnixTimeMilliseconds(pair.PairCreatedAt);
@@ -91,6 +92,9 @@ file class DexPair
 
     [JsonPropertyName("pairCreatedAt")]
     public long PairCreatedAt { get; set; }
+
+    [JsonPropertyName("pairAddress")]
+    public string? PairAddress { get; set; }
 }
 
 file class DexToken

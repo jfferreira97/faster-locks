@@ -9,6 +9,8 @@ public class SentAlert
     public decimal AmountLocked { get; set; }
     public decimal PercentSupply { get; set; }
     public decimal MarketCapUsd { get; set; }
-    public DateTimeOffset? UnlockDate { get; set; }
-    public DateTimeOffset SentAt { get; set; }
+    public DateTimeOffset? UnlockDate    { get; set; }
+    public DateTimeOffset? PairCreatedAt { get; set; }
+    public string PairAddress            { get; set; } = "";
+    public DateTimeOffset SentAt         { get; set; }
 }

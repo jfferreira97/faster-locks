@@ -52,14 +52,16 @@ public class HeliusWebhookController(
 
                 var record = new SentAlert
                 {
-                    Signature    = alert.Signature,
-                    TokenMint    = alert.TokenMint,
-                    TokenSymbol  = alert.TokenSymbol,
-                    AmountLocked = alert.AmountLocked,
+                    Signature     = alert.Signature,
+                    TokenMint     = alert.TokenMint,
+                    TokenSymbol   = alert.TokenSymbol,
+                    AmountLocked  = alert.AmountLocked,
                     PercentSupply = alert.PercentSupply,
-                    MarketCapUsd = alert.MarketCapUsd,
-                    UnlockDate   = alert.UnlockDate,
-                    SentAt       = DateTimeOffset.UtcNow
+                    MarketCapUsd  = alert.MarketCapUsd,
+                    UnlockDate    = alert.UnlockDate,
+                    PairCreatedAt = alert.PairCreatedAt,
+                    PairAddress   = alert.PairAddress,
+                    SentAt        = DateTimeOffset.UtcNow
                 };
                 db.SentAlerts.Add(record);
                 await db.SaveChangesAsync();
