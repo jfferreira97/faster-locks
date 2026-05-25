@@ -36,19 +36,29 @@ public class StreamflowParserService(ILogger<StreamflowParserService> logger)
             })),
             string.Join(", ", sfIx.Accounts.Take(6).Select(a => a[..8])));
 
+        // accounts[0]=sender, [1]=senderTokens, [2]=recipient, [3]=streamMetadata(PDA), [4]=escrowTokens
+        var escrowAccount = sfIx.Accounts.ElementAtOrDefault(4) ?? "";
+        var streamAccount = sfIx.Accounts.ElementAtOrDefault(3) ?? "";
+        var recipient     = sfIx.Accounts.ElementAtOrDefault(2) ?? "";
+
+        // Lock transfer = tokens going INTO the escrow (not the fee to Streamflow treasury)
         var transfer = tx.TokenTransfers
-            .FirstOrDefault(t => t.FromUserAccount == tx.FeePayer && t.TokenAmount > 0);
+            .FirstOrDefault(t => t.TokenAmount > 0 &&
+                (t.ToUserAccount == escrowAccount || t.ToTokenAccount == escrowAccount));
 
         if (transfer is null)
         {
-            logger.LogInformation("⏭  skip {Sig} — no outbound from feePayer, probably withdraw/cancel", tx.Signature?[..8]);
-            return Task.FromResult<StreamAlert?>(null);
+            // Fallback: largest outbound from feePayer (in case escrow index differs)
+            transfer = tx.TokenTransfers
+                .Where(t => t.FromUserAccount == tx.FeePayer && t.TokenAmount > 0)
+                .MaxBy(t => t.TokenAmount);
         }
 
-        var streamAccount = sfIx.Accounts.ElementAtOrDefault(0) ?? "";
-        var recipient = sfIx.Accounts.ElementAtOrDefault(5)
-                     ?? sfIx.Accounts.ElementAtOrDefault(4)
-                     ?? "";
+        if (transfer is null)
+        {
+            logger.LogInformation("⏭  skip {Sig} — no lock transfer found, probably withdraw/cancel", tx.Signature?[..8]);
+            return Task.FromResult<StreamAlert?>(null);
+        }
 
         var txTime = DateTimeOffset.FromUnixTimeSeconds(tx.Timestamp);
 

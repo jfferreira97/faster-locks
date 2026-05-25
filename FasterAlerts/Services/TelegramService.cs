@@ -1,7 +1,7 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using FasterAlerts.Models;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace FasterAlerts.Services;
@@ -12,19 +12,22 @@ public class TelegramService(HttpClient http, IConfiguration config, ILogger<Tel
     private IEnumerable<string> ChatIds => (config["Telegram:CommaSeperatedChatIds"] ?? "")
         .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-    public async Task SendAlertAsync(StreamAlert alert)
+    // Returns list of (chatId, messageId) for each successfully sent message
+    public async Task<List<(string ChatId, int MsgId)>> SendAlertAsync(StreamAlert alert)
     {
+        var sent = new List<(string, int)>();
+
         if (string.IsNullOrEmpty(BotToken))
         {
             logger.LogWarning("Telegram BotToken not configured — skipping alert");
-            return;
+            return sent;
         }
 
         var ids = ChatIds.Where(id => !string.IsNullOrWhiteSpace(id)).ToList();
         if (ids.Count == 0)
         {
             logger.LogWarning("No Telegram ChatIds configured — skipping alert");
-            return;
+            return sent;
         }
 
         var text = BuildMessage(alert);
@@ -36,7 +39,14 @@ public class TelegramService(HttpClient http, IConfiguration config, ILogger<Tel
             {
                 var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
                 var resp = await http.PostAsync($"https://api.telegram.org/bot{BotToken}/sendMessage", content);
-                if (!resp.IsSuccessStatusCode)
+                if (resp.IsSuccessStatusCode)
+                {
+                    var body = await resp.Content.ReadAsStringAsync();
+                    var result = JsonSerializer.Deserialize<TgResponse>(body, JsonOpts);
+                    if (result?.Ok == true && result.Result?.MessageId is int msgId)
+                        sent.Add((chatId, msgId));
+                }
+                else
                 {
                     var body = await resp.Content.ReadAsStringAsync();
                     logger.LogError("Telegram sendMessage failed for {ChatId} {Status}: {Body}", chatId, resp.StatusCode, body);
@@ -47,13 +57,35 @@ public class TelegramService(HttpClient http, IConfiguration config, ILogger<Tel
                 logger.LogError(ex, "Failed to send Telegram alert to {ChatId}", chatId);
             }
         }
+
+        return sent;
+    }
+
+    public async Task EditAlertAsync(string chatId, int messageId, StreamAlert alert)
+    {
+        if (string.IsNullOrEmpty(BotToken)) return;
+        try
+        {
+            var text    = BuildMessage(alert);
+            var payload = new { chat_id = chatId, message_id = messageId, text, parse_mode = "HTML", disable_web_page_preview = true };
+            var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+            var resp    = await http.PostAsync($"https://api.telegram.org/bot{BotToken}/editMessageText", content);
+            if (!resp.IsSuccessStatusCode)
+            {
+                var body = await resp.Content.ReadAsStringAsync();
+                logger.LogWarning("Telegram editMessageText failed {Status}: {Body}", resp.StatusCode, body);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to edit Telegram message {MsgId} in {ChatId}", messageId, chatId);
+        }
     }
 
     private static string BuildMessage(StreamAlert a)
     {
         var sb = new StringBuilder();
 
-        // Line 1: pct of supply + symbol + market cap
         var pct = a.PercentSupply > 0 ? $"{a.PercentSupply:F2}%" : "?%";
         var mc  = a.MarketCapUsd > 0 ? $" (${FormatMc(a.MarketCapUsd)} MC)" : "";
         var age = a.PairCreatedAt.HasValue ? $" · {FormatAge(a.PairCreatedAt.Value)}" : "";
@@ -123,21 +155,19 @@ public class TelegramService(HttpClient http, IConfiguration config, ILogger<Tel
         _                => $"{mc / 1_000:0.##}k"
     };
 
-    private static string ShortAddr(string addr)
-    {
-        if (string.IsNullOrEmpty(addr)) return "unknown";
-        return addr.Length > 12 ? $"{addr[..6]}...{addr[^6..]}" : addr;
-    }
-
     private static string HtmlEncode(string s) =>
         s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 
-    private static string FormatAgo(DateTimeOffset ts)
-    {
-        var diff = DateTimeOffset.UtcNow - ts;
-        if (diff.TotalSeconds < 60) return "Just now";
-        if (diff.TotalMinutes < 60) return $"{(int)diff.TotalMinutes} min ago";
-        if (diff.TotalHours < 24) return $"{(int)diff.TotalHours} hr ago";
-        return ts.ToString("MMM d, HH:mm UTC");
-    }
+    private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
+}
+
+file class TgResponse
+{
+    [JsonPropertyName("ok")]     public bool      Ok     { get; set; }
+    [JsonPropertyName("result")] public TgMessage? Result { get; set; }
+}
+
+file class TgMessage
+{
+    [JsonPropertyName("message_id")] public int MessageId { get; set; }
 }

@@ -4,6 +4,7 @@ using FasterAlerts.Data;
 using FasterAlerts.Models;
 using FasterAlerts.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace FasterAlerts.Controllers;
 
@@ -14,6 +15,7 @@ public class HeliusWebhookController(
     DexScreenerService dexScreener,
     TelegramService telegram,
     AppDbContext db,
+    IServiceScopeFactory scopeFactory,
     ILogger<HeliusWebhookController> logger) : ControllerBase
 {
     private const string PayloadLog = @"C:\Users\Administrator\Desktop\faster-locks-payloads.txt";
@@ -68,10 +70,14 @@ public class HeliusWebhookController(
 
                 alert.NotificationId = record.Id;
 
-                await telegram.SendAlertAsync(alert);
+                var sentMsgs = await telegram.SendAlertAsync(alert);
 
                 logger.LogInformation("✅ alert sent | #{Id} | {Symbol} | {Amount:N0} locked | sig={Sig}",
                     alert.NotificationId, alert.TokenSymbol, alert.AmountLocked, alert.Signature?[..8]);
+
+                // If market cap was missing, re-enrich in background and edit the message
+                if (alert.MarketCapUsd == 0 && sentMsgs.Count > 0)
+                    ScheduleReEnrichment(record.Id, alert, sentMsgs);
             }
             catch (Exception ex)
             {
@@ -80,5 +86,50 @@ public class HeliusWebhookController(
         }
 
         return Ok();
+    }
+
+    private void ScheduleReEnrichment(int alertId, StreamAlert alert, List<(string ChatId, int MsgId)> sentMsgs)
+    {
+        _ = Task.Run(async () =>
+        {
+            for (var attempt = 0; attempt < 10; attempt++)
+            {
+                await Task.Delay(10_000);
+                try
+                {
+                    using var scope = scopeFactory.CreateScope();
+                    var ds  = scope.ServiceProvider.GetRequiredService<DexScreenerService>();
+                    var tg  = scope.ServiceProvider.GetRequiredService<TelegramService>();
+                    var db2 = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+                    await ds.EnrichAsync(alert);
+                    if (alert.MarketCapUsd == 0) continue;
+
+                    var record = await db2.SentAlerts.FindAsync(alertId);
+                    if (record is not null)
+                    {
+                        record.MarketCapUsd  = alert.MarketCapUsd;
+                        record.PercentSupply = alert.PercentSupply;
+                        record.PairCreatedAt = alert.PairCreatedAt;
+                        record.PairAddress   = alert.PairAddress;
+                        record.TokenSymbol   = alert.TokenSymbol;
+                        await db2.SaveChangesAsync();
+                    }
+
+                    foreach (var (chatId, msgId) in sentMsgs)
+                        await tg.EditAlertAsync(chatId, msgId, alert);
+
+                    logger.LogInformation("✅ re-enriched #{Id} | mc=${Mc:N0} | edited {N} messages",
+                        alertId, alert.MarketCapUsd, sentMsgs.Count);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Re-enrichment attempt {Attempt} failed for alert #{Id}", attempt + 1, alertId);
+                }
+            }
+
+            logger.LogWarning("Re-enrichment gave up after 10 attempts for alert #{Id}", alertId);
+        });
     }
 }
