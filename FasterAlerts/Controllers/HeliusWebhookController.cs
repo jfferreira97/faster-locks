@@ -14,6 +14,7 @@ public class HeliusWebhookController(
     StreamflowParserService parser,
     DexScreenerService dexScreener,
     TelegramService telegram,
+    AutoTradeService autoTrade,
     AppDbContext db,
     IServiceScopeFactory scopeFactory,
     ILogger<HeliusWebhookController> logger) : ControllerBase
@@ -27,30 +28,41 @@ public class HeliusWebhookController(
         if (transactions is null || transactions.Count == 0)
             return Ok();
 
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                var sb = new StringBuilder();
-                foreach (var tx in transactions)
-                {
-                    sb.AppendLine($"[{DateTimeOffset.UtcNow:yyyy-MM-ddTHH:mm:ss.fffZ}]");
-                    sb.AppendLine(JsonSerializer.Serialize(tx, Pretty));
-                    sb.AppendLine(new string('─', 80));
-                }
-                await System.IO.File.AppendAllTextAsync(PayloadLog, sb.ToString());
-            }
-            catch { }
-        });
+        // _ = Task.Run(async () =>
+        // {
+        //     try
+        //     {
+        //         var sb = new StringBuilder();
+        //         foreach (var tx in transactions)
+        //         {
+        //             sb.AppendLine($"[{DateTimeOffset.UtcNow:yyyy-MM-ddTHH:mm:ss.fffZ}]");
+        //             sb.AppendLine(JsonSerializer.Serialize(tx, Pretty));
+        //             sb.AppendLine(new string('─', 80));
+        //         }
+        //         await System.IO.File.AppendAllTextAsync(PayloadLog, sb.ToString());
+        //     }
+        //     catch { }
+        // });
 
         foreach (var tx in transactions)
         {
             try
             {
+                // Dedup: Helius may deliver the same tx from multiple webhook subscriptions
+                if (tx.Signature != null &&
+                    await db.SentAlerts.AnyAsync(a => a.Signature == tx.Signature))
+                {
+                    logger.LogInformation("⏭  skip duplicate sig {Sig}", tx.Signature[..8]);
+                    continue;
+                }
+
                 var alert = await parser.ParseAsync(tx);
                 if (alert is null) continue;
 
                 await dexScreener.EnrichAsync(alert);
+
+                // Fire trade immediately — don't wait for DB/Telegram
+                _ = Task.Run(() => autoTrade.TryTradeAsync(alert));
 
                 var record = new SentAlert
                 {

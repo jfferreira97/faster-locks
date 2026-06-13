@@ -118,6 +118,13 @@ public class BacktestController(
   .reco-combo { font-weight:600; color:#5ca8e2; }
   .reco-ev    { color:#4caf50; font-size:12px; }
   .reco-pct   { color:#8a96a0; font-size:11px; }
+  .tab-bar { max-width:1400px; margin:0 auto 16px; display:flex; gap:8px; }
+  .tab-btn { background:#17212b; border:1px solid #2b3a4a; border-radius:8px; color:#8a96a0;
+    font-size:13px; font-weight:600; padding:8px 18px; cursor:pointer; transition:all .15s; }
+  .tab-btn.active { background:#2b5278; border-color:#5ca8e2; color:#e8e9ea; }
+  .tab-btn:hover:not(.active) { background:#1e2d3d; color:#e8e9ea; }
+  .badge-auto   { background:#1a3a2a; color:#4caf50; }
+  .badge-manual { background:#2a2a1a; color:#f0a33c; }
 </style>
 </head>
 <body>
@@ -125,6 +132,12 @@ public class BacktestController(
   <span class="page-title">🔬 Backtest Engine</span>
   <span class="page-sub">Helius price series · cached dataset · SL/TP simulation</span>
 </div>
+
+<div class="tab-bar">
+  <button class="tab-btn active" onclick="switchTab('backtest',this)">🔬 Backtest Engine</button>
+  <button class="tab-btn" onclick="switchTab('myTrades',this)">📊 My Trades</button>
+</div>
+<div id="tab-backtest">
 
 <div class="layout">
   <div>
@@ -211,6 +224,37 @@ public class BacktestController(
       <div class="card-title">Best SL/TP Combinations</div>
       <div id="recoList"></div>
     </div>
+  </div>
+</div>
+</div><!-- /tab-backtest -->
+
+<div id="tab-myTrades" style="display:none;max-width:1400px;margin:0 auto">
+  <div class="stats-row" style="margin-bottom:14px">
+    <div class="stat-card"><div class="stat-val" id="mt-count">—</div><div class="stat-lbl">Closed Trades</div></div>
+    <div class="stat-card"><div class="stat-val" id="mt-cached">—</div><div class="stat-lbl">With Price Data</div></div>
+    <div class="stat-card"><div class="stat-val" id="mt-pnl">—</div><div class="stat-lbl">Total P&amp;L (SOL)</div></div>
+  </div>
+  <div style="display:flex;gap:14px;margin-bottom:14px;align-items:start">
+    <div class="card" style="flex:1;margin-bottom:0">
+      <div class="card-title">Optimal Settings — Auto Trades Only</div>
+      <div id="mt-recoList" style="color:#6c7883;font-size:12px">Open tab to load data</div>
+    </div>
+    <div class="card" style="min-width:230px;margin-bottom:0">
+      <div class="card-title">Missing Price Data</div>
+      <div style="font-size:12px;color:#8a96a0;margin-bottom:10px" id="mt-missingInfo">—</div>
+      <button class="btn btn-green" id="mt-fetchBtn" onclick="fetchMissingData()">Fetch Missing Data</button>
+      <div style="font-size:11px;color:#6c7883;margin-top:6px" id="mt-fetchStatus"></div>
+    </div>
+  </div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr>
+        <th>#</th><th>Token</th><th>Src</th><th>Entry Time</th>
+        <th>Entry MC</th><th>ATH MC</th><th>Actual P&amp;L</th>
+        <th>Peak from Entry</th><th>Best TP Hit <span style="font-weight:400;color:#6c7883">(25% SL ref)</span></th><th>Lock</th>
+      </tr></thead>
+      <tbody id="mt-body"><tr><td colspan="10" class="no-data">Click "My Trades" tab to load</td></tr></tbody>
+    </table>
   </div>
 </div>
 
@@ -399,6 +443,125 @@ function fmtTime(m) {
 }
 
 loadCached();
+
+// ── My Trades tab ──────────────────────────────────────────────────────────
+let myTradesLoaded = false;
+
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('tab-backtest').style.display = name === 'backtest' ? '' : 'none';
+  document.getElementById('tab-myTrades').style.display = name === 'myTrades' ? '' : 'none';
+  if (name === 'myTrades' && !myTradesLoaded) { myTradesLoaded = true; loadMyTrades(); }
+}
+
+async function loadMyTrades() {
+  document.getElementById('mt-body').innerHTML = '<tr><td colspan="10" class="no-data">Loading…</td></tr>';
+  const r = await fetch('/backtest/api/my-trades');
+  const d = await r.json();
+  renderMyTrades(d);
+}
+
+function renderMyTrades(d) {
+  const trades = d.trades || [];
+  const withCache = trades.filter(t => t.hasCache).length;
+  const totalPnl  = trades.reduce((a, t) => a + (t.pnlSol || 0), 0);
+  document.getElementById('mt-count').textContent  = trades.length;
+  document.getElementById('mt-cached').textContent = withCache + ' / ' + trades.length;
+  document.getElementById('mt-pnl').textContent    = (totalPnl >= 0 ? '+' : '') + totalPnl.toFixed(4) + ' SOL';
+  document.getElementById('mt-pnl').style.color    = totalPnl >= 0 ? '#4caf50' : '#e05656';
+
+  const missing = d.missingCache || 0;
+  document.getElementById('mt-missingInfo').textContent = missing > 0
+    ? missing + ' trade(s) need price data'
+    : 'All trades have price data ✓';
+  document.getElementById('mt-fetchBtn').style.display = missing > 0 ? '' : 'none';
+
+  if (d.aggregate && d.aggregate.top && d.aggregate.top.length > 0) {
+    document.getElementById('mt-recoList').innerHTML = d.aggregate.top.map((c, i) => `
+      <div class="reco-row">
+        <span class="reco-combo">#${i+1} SL ${c.sl}% / TP ${c.tp}%</span>
+        <span class="reco-ev">EV ${c.evUsd >= 0 ? '+' : ''}$${c.evUsd.toFixed(2)}/trade</span>
+        <span class="reco-pct">${d.aggregate.count} Auto trades</span>
+      </div>`).join('');
+  } else {
+    document.getElementById('mt-recoList').textContent = trades.length === 0
+      ? 'No closed trades yet.'
+      : 'No Auto trades with price data yet — fetch missing data first.';
+  }
+
+  if (trades.length === 0) {
+    document.getElementById('mt-body').innerHTML = '<tr><td colspan="10" class="no-data">No closed trades found.</td></tr>';
+    return;
+  }
+
+  document.getElementById('mt-body').innerHTML = trades.map(t => {
+    const srcBadge = t.source === 'Auto'
+      ? '<span class="badge badge-auto">Auto</span>'
+      : '<span class="badge badge-manual">Manual</span>';
+
+    const pnlColor = (t.actualPnlPct || 0) >= 0 ? '#4caf50' : '#e05656';
+    const pnlStr = t.actualPnlPct != null
+      ? `<span style="color:${pnlColor}">${t.actualPnlPct >= 0 ? '+' : ''}${t.actualPnlPct}%</span><div style="font-size:10px;color:#6c7883">${t.pnlSol >= 0 ? '+' : ''}${t.pnlSol.toFixed(4)} SOL</div>`
+      : '—';
+
+    const peakStr = t.hasCache
+      ? `<span style="color:${t.peakGainPct > 0 ? '#4caf50' : '#8a96a0'}">${t.peakGainPct > 0 ? '+' : ''}${t.peakGainPct.toFixed(0)}%</span>` +
+        (t.maxDdPct < -2 ? `<div style="font-size:10px;color:#e05656">min ${t.maxDdPct.toFixed(0)}%</div>` : '')
+      : '<span style="color:#6c7883;font-size:11px">no data</span>';
+
+    const tpBadge = !t.hasCache ? '—'
+      : t.bestTpHit > 0
+        ? `<span class="badge badge-tp">+${t.bestTpHit}% TP ✓</span>`
+        : '<span style="color:#e05656;font-size:11px">SL hit first</span>';
+
+    const lockInfo = t.vestingDays > 0 || t.percentSupply > 0
+      ? `${t.vestingDays}d · ${(t.percentSupply || 0).toFixed(1)}%`
+      : '—';
+
+    const athColor = t.athMcapUsd > t.entryMcapUsd * 1.1 ? '#4caf50' : '#8a96a0';
+
+    return `<tr>
+      <td style="color:#6c7883">#${t.tradeId}</td>
+      <td>
+        <div style="font-weight:600">$${t.tokenSymbol}</div>
+        <div style="font-size:10px;color:#5ca8e2;cursor:pointer;font-family:monospace" onclick="copyCA('${t.tokenMint}',this)">${t.tokenMint.slice(0,6)}…${t.tokenMint.slice(-4)}</div>
+      </td>
+      <td>${srcBadge}</td>
+      <td style="font-size:11px;color:#8a96a0">${fmtTs(t.entryTime)}</td>
+      <td>${fmtMc(t.entryMcapUsd)}</td>
+      <td style="color:${athColor}">${fmtMc(t.athMcapUsd) || '—'}</td>
+      <td>${pnlStr}</td>
+      <td>${peakStr}</td>
+      <td>${tpBadge}</td>
+      <td style="font-size:11px;color:#8a96a0">${lockInfo}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function fetchMissingData() {
+  document.getElementById('mt-fetchBtn').disabled = true;
+  document.getElementById('mt-fetchStatus').textContent = 'Starting…';
+  const r = await fetch('/backtest/api/fetch-for-trades', { method: 'POST' });
+  const d = await r.json();
+  if (d.started) {
+    document.getElementById('mt-fetchStatus').textContent = 'Fetching ' + d.count + ' token(s)…';
+    pollMtStatus();
+  } else {
+    document.getElementById('mt-fetchStatus').textContent = d.reason || 'done';
+    document.getElementById('mt-fetchBtn').disabled = false;
+  }
+}
+
+async function pollMtStatus() {
+  const r = await fetch('/backtest/api/status');
+  const d = await r.json();
+  document.getElementById('mt-fetchStatus').textContent = d.running
+    ? d.processed + '/' + d.total + ': ' + d.msg
+    : 'Done — ' + d.msg;
+  if (d.running) setTimeout(pollMtStatus, 2000);
+  else { document.getElementById('mt-fetchBtn').disabled = false; loadMyTrades(); }
+}
 </script>
 </body>
 </html>
@@ -694,6 +857,159 @@ loadCached();
             .ToList();
 
         return Ok(new { top });
+    }
+
+    // ── GET /backtest/api/my-trades ───────────────────────────────────────
+
+    [HttpGet("api/my-trades")]
+    public async Task<IActionResult> MyTradesData()
+    {
+        var closed    = await db.Trades.Where(t => t.Status == "Closed").OrderByDescending(t => t.EntryTime).ToListAsync();
+        var allAlerts = await db.SentAlerts.ToListAsync();
+        var cacheMap  = (await db.BacktestCache.Where(b => b.FetchStatus == "DONE").ToListAsync())
+                            .ToDictionary(c => c.SentAlertId);
+
+        var rows = new List<object>();
+        int missingCache = 0, missingAlert = 0;
+        var autoForSweep = new List<(PricePoint[] pts, decimal ep)>();
+
+        foreach (var trade in closed)
+        {
+            // Match alert: same mint, sent at most 3h before actual fill
+            var alert = allAlerts
+                .Where(a => a.TokenMint == trade.TokenMint
+                         && a.SentAt   <= trade.EntryTime
+                         && (trade.EntryTime - a.SentAt).TotalHours <= 3)
+                .OrderByDescending(a => a.SentAt)
+                .FirstOrDefault();
+
+            if (alert is null) { missingAlert++; missingCache++; }
+            else if (!cacheMap.ContainsKey(alert.Id)) missingCache++;
+
+            var ep      = (decimal)trade.EntryPriceSol;
+            var entryTs = trade.EntryTime.ToUnixTimeSeconds();
+            PricePoint[]? pts = null;
+            double peakPct = 0, minPct = 0;
+            int bestTpHit = 0;
+
+            if (alert != null && cacheMap.TryGetValue(alert.Id, out var cache) && ep > 0)
+            {
+                var raw = JsonSerializer.Deserialize<PricePoint[]>(cache.SeriesJson) ?? [];
+                pts     = raw.Where(p => p.T >= entryTs).ToArray();
+
+                foreach (var pt in pts)
+                {
+                    var chg = (double)((pt.P - ep) / ep * 100);
+                    if (chg > peakPct) peakPct = chg;
+                    if (chg < minPct)  minPct  = chg;
+                }
+
+                // Highest TP% that would have been triggered before 25% SL (in time order)
+                var slP = ep * 0.75m;
+                foreach (var tpPct in new[] { 500, 300, 200, 150, 100, 75, 50 })
+                {
+                    var tpP = ep * (1 + tpPct / 100m);
+                    if (pts.TakeWhile(pt => pt.P > slP).Any(pt => pt.P >= tpP))
+                        { bestTpHit = tpPct; break; }
+                }
+
+                if (trade.Source == "Auto" && pts.Length > 0)
+                    autoForSweep.Add((pts, ep));
+            }
+
+            var actualPnlPct = trade.EntryPriceSol > 0 && trade.ExitPriceSol.HasValue
+                ? Math.Round((trade.ExitPriceSol.Value - trade.EntryPriceSol) / trade.EntryPriceSol * 100, 1)
+                : (double?)null;
+
+            rows.Add(new
+            {
+                tradeId       = trade.Id,
+                tokenMint     = trade.TokenMint,
+                tokenSymbol   = trade.TokenSymbol,
+                source        = trade.Source,
+                entryTime     = entryTs,
+                entryMcapUsd  = trade.EntryMarketCapUsd,
+                athMcapUsd    = trade.AthMarketCapUsd,
+                exitMcapUsd   = trade.ExitMarketCapUsd,
+                pnlSol        = Math.Round(trade.PnlSol ?? 0, 4),
+                actualPnlPct,
+                vestingDays   = trade.VestingDays,
+                percentSupply = trade.PercentSupply,
+                lockedUsd     = trade.LockedUsd,
+                hasCache      = pts != null && pts.Length > 0,
+                peakGainPct   = Math.Round(peakPct, 1),
+                maxDdPct      = Math.Round(minPct, 1),
+                bestTpHit,
+                alertId       = alert?.Id
+            });
+        }
+
+        // Aggregate SL/TP sweep across Auto trades with data
+        object? aggregate = null;
+        if (autoForSweep.Count > 0)
+        {
+            const double unit = 40.0;
+            var sweepRows = new List<object>();
+
+            foreach (var slPct in new[] { 10, 15, 20, 25, 30, 40, 50 })
+            foreach (var tpPct in new[] { 50, 75, 100, 150, 200, 300, 500 })
+            {
+                var sl = slPct / 100m;
+                var tp = tpPct / 100m;
+                var pnls = new List<double>();
+                foreach (var (s, ep) in autoForSweep)
+                {
+                    var slP = ep * (1 - sl);
+                    var tpP = ep * (1 + tp);
+                    foreach (var pt in s)
+                    {
+                        if (pt.P <= slP) { pnls.Add(unit * (double)((pt.P - ep) / ep)); break; }
+                        if (pt.P >= tpP) { pnls.Add(unit * (double)tp);                 break; }
+                    }
+                }
+                var evUsd = pnls.Count > 0 ? pnls.Average() : 0;
+                sweepRows.Add(new { sl = slPct, tp = tpPct, evUsd = Math.Round(evUsd, 2) });
+            }
+
+            var top5 = sweepRows.OrderByDescending(r => ((dynamic)r).evUsd).Take(5).ToList();
+            aggregate = new { top = top5, count = autoForSweep.Count };
+        }
+
+        return Ok(new { trades = rows, missingCache, missingAlert, aggregate });
+    }
+
+    // ── POST /backtest/api/fetch-for-trades ───────────────────────────────
+
+    [HttpPost("api/fetch-for-trades")]
+    public async Task<IActionResult> FetchForTrades()
+    {
+        if (HeliusBacktestService.IsRunning)
+            return Ok(new { started = false, reason = "job already running" });
+
+        var closed    = await db.Trades.Where(t => t.Status == "Closed").ToListAsync();
+        var allAlerts = await db.SentAlerts.ToListAsync();
+        var cached    = (await db.BacktestCache.Where(b => b.FetchStatus == "DONE")
+                            .Select(b => b.SentAlertId).ToListAsync()).ToHashSet();
+
+        var toFetch = new HashSet<int>();
+        foreach (var trade in closed)
+        {
+            var alert = allAlerts
+                .Where(a => a.TokenMint == trade.TokenMint
+                         && a.SentAt   <= trade.EntryTime
+                         && (trade.EntryTime - a.SentAt).TotalHours <= 3)
+                .OrderByDescending(a => a.SentAt)
+                .FirstOrDefault();
+
+            if (alert != null && !cached.Contains(alert.Id))
+                toFetch.Add(alert.Id);
+        }
+
+        if (toFetch.Count == 0)
+            return Ok(new { started = false, reason = "all data already cached" });
+
+        helius.StartJob(toFetch.ToList());
+        return Ok(new { started = true, count = toFetch.Count });
     }
 
     // ── helpers ───────────────────────────────────────────────────────────
