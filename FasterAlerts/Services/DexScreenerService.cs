@@ -6,6 +6,9 @@ using Microsoft.Extensions.Logging;
 
 namespace FasterAlerts.Services;
 
+public record DsTokenSnapshot(string Symbol, decimal PriceUsd, decimal MarketCapUsd,
+    decimal Vol1h, decimal Vol6h, decimal Vol24h);
+
 public class DexScreenerService(HttpClient http, IConfiguration config, ILogger<DexScreenerService> logger)
 {
     private string HeliusRpc => $"https://mainnet.helius-rpc.com/?api-key={config["Helius:ApiKey"]}";
@@ -116,6 +119,49 @@ public class DexScreenerService(HttpClient http, IConfiguration config, ILogger<
     private static string ShortAddr(string addr) =>
         addr.Length > 12 ? $"{addr[..6]}...{addr[^4..]}" : addr;
 
+    public async Task<Dictionary<string, DsTokenSnapshot>> GetTokensInfoAsync(IList<string> mints)
+    {
+        var result = new Dictionary<string, DsTokenSnapshot>(StringComparer.OrdinalIgnoreCase);
+        const int batchSize = 30;
+
+        for (int i = 0; i < mints.Count; i += batchSize)
+        {
+            var batch  = mints.Skip(i).Take(batchSize).ToList();
+            var joined = string.Join(",", batch);
+            try
+            {
+                var resp = await http.GetAsync($"https://api.dexscreener.com/tokens/v1/solana/{joined}");
+                if (!resp.IsSuccessStatusCode) continue;
+                var json  = await resp.Content.ReadAsStringAsync();
+                var pairs = JsonSerializer.Deserialize<List<DexPair>>(json, JsonOptions);
+                if (pairs is null) continue;
+
+                foreach (var pair in pairs)
+                {
+                    var mint = pair.BaseToken?.Address;
+                    if (mint is null || result.ContainsKey(mint)) continue;
+
+                    decimal.TryParse(pair.PriceUsd,
+                        System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var price);
+                    var mc = pair.MarketCap > 0 ? pair.MarketCap : pair.Fdv;
+
+                    result[mint] = new DsTokenSnapshot(
+                        pair.BaseToken?.Symbol ?? "",
+                        price, mc,
+                        pair.Volume?.H1  ?? 0,
+                        pair.Volume?.H6  ?? 0,
+                        pair.Volume?.H24 ?? 0);
+                }
+            }
+            catch (Exception ex) { logger.LogWarning(ex, "GetTokensInfoAsync batch {I} failed", i); }
+
+            if (i + batchSize < mints.Count) await Task.Delay(250);
+        }
+
+        return result;
+    }
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -124,18 +170,27 @@ public class DexScreenerService(HttpClient http, IConfiguration config, ILogger<
 
 file class DexPair
 {
-    [JsonPropertyName("baseToken")]    public DexToken? BaseToken    { get; set; }
-    [JsonPropertyName("priceUsd")]     public string?   PriceUsd     { get; set; }
-    [JsonPropertyName("marketCap")]    public decimal   MarketCap    { get; set; }
-    [JsonPropertyName("fdv")]          public decimal   Fdv          { get; set; }
-    [JsonPropertyName("pairCreatedAt")]public long      PairCreatedAt{ get; set; }
-    [JsonPropertyName("pairAddress")]  public string?   PairAddress  { get; set; }
+    [JsonPropertyName("baseToken")]    public DexToken?  BaseToken    { get; set; }
+    [JsonPropertyName("priceUsd")]     public string?    PriceUsd     { get; set; }
+    [JsonPropertyName("marketCap")]    public decimal    MarketCap    { get; set; }
+    [JsonPropertyName("fdv")]          public decimal    Fdv          { get; set; }
+    [JsonPropertyName("pairCreatedAt")]public long       PairCreatedAt{ get; set; }
+    [JsonPropertyName("pairAddress")]  public string?    PairAddress  { get; set; }
+    [JsonPropertyName("volume")]       public DexVolume? Volume       { get; set; }
+}
+
+file class DexVolume
+{
+    [JsonPropertyName("h1")]  public decimal H1  { get; set; }
+    [JsonPropertyName("h6")]  public decimal H6  { get; set; }
+    [JsonPropertyName("h24")] public decimal H24 { get; set; }
 }
 
 file class DexToken
 {
-    [JsonPropertyName("name")]   public string? Name   { get; set; }
-    [JsonPropertyName("symbol")] public string? Symbol { get; set; }
+    [JsonPropertyName("name")]    public string? Name    { get; set; }
+    [JsonPropertyName("symbol")]  public string? Symbol  { get; set; }
+    [JsonPropertyName("address")] public string? Address { get; set; }
 }
 
 file class DasResponse

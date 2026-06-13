@@ -33,6 +33,7 @@ builder.Services.AddHttpClient<JupiterService>();
 builder.Services.AddSingleton<TradingEventLog>();
 builder.Services.AddSingleton<PumpFunMonitorService>();
 builder.Services.AddSingleton<AutoTradeService>();
+builder.Services.AddHostedService<TelegramPollingService>();
 
 var app = builder.Build();
 
