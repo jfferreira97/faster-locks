@@ -145,8 +145,9 @@ public class TelegramPollingService(
                 _              => "n/a"
             };
 
-            var lockDur  = FormatLockDuration(a.SentAt, a.UnlockDate);
-            var lockInfo = $"{a.PercentSupply:F1}%" + (lockDur != "" ? $" · {lockDur}" : "") + $" · {FormatAge(a.SentAt)}";
+            var lockDur   = FormatLockDuration(a.SentAt, a.UnlockDate);
+            var lockStamp = a.SentAt.ToLocalTime().ToString("HH:mm dd-MMM");
+            var lockInfo  = $"{a.PercentSupply:F1}%" + (lockDur != "" ? $" · {lockDur}" : "") + $" · {lockStamp}";
 
             sb.AppendLine($"{i + 1}. <b>${HtmlEncode(a.TokenSymbol)}</b> · <code>{a.TokenMint}</code>");
 
